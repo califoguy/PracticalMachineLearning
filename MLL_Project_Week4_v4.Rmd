@@ -1,0 +1,129 @@
+---
+title: "Practical Machine Learning Asignment"
+author: "Anand D"
+date: "January 30, 2016"
+output: html_document
+---
+
+Machine Learning Prediction - An Analysis of the dataset related to Weighlifting Exercise.
+------------------------------------------------------------------------------------------
+
+##Executive Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect 
+a large amount of data about personal activity relatively in expensively. 
+The goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. 
+They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set.
+
+### Data Processing And Data Analysis
+
+The Training and the Test datasets used are shown below.
+
+Training dataset: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+Testing dataset: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The initial step of loading the libraries and reading datasets, replacing the missing data with a substitution value like "NA" or NULL ("") are done here.
+
+
+```{r echo=FALSE, message=FALSE, warnings=FALSE }
+suppressWarnings(suppressMessages(library(corrplot)))
+suppressWarnings(suppressMessages(library(caret)))
+
+har_traindata <-  read.csv("pml-training.csv", header = TRUE, na.strings = c("NA", ""))
+har_testdata <-  read.csv("pml-testing.csv", header = TRUE, na.strings = c("NA", ""))
+```
+
+Next we eliminate and filter unwanted/missing data out of our dataset.  We use colsums to see if NA exist in the columns. If they are present the sums are kept for each column in the training set. Then the completed cases are reassigned to the set which then stores complete values which are fitted. 
+
+```{r}
+
+columnsums <- colSums(is.na(har_traindata))
+colsums_log <- (columnsums == 0)
+training_lesscols <- har_traindata[, (colSums(is.na(har_traindata)) == 0)]
+har_testdata <- har_testdata[, (colSums(is.na(har_traindata)) == 0)]
+```
+
+We eliminate unwanted columns for analysis by cereating another vector from the cleansed completed data. We list the columns names to the grepl function which searches for it and we eliminate it subsequently. This leaves a set of usable column and its data for further analysis.
+```{r}
+deleted_cols <-  grepl("X|user_name|timestamp|new_window", colnames(training_lesscols))
+training_lesscols <- training_lesscols[,!deleted_cols]
+har_testdata_final <- har_testdata[,!deleted_cols]
+```
+
+Next we build the training and validation data sets.  The smaller datasets are built by partitioning the data to 70:30 ratio for training and validation sets respectively. The ones that are highly correlated are to be removed. Now this set contains the 'classe' column as well in the dataset which is also being predicted.
+```{r}
+inTrain = createDataPartition(y = training_lesscols$classe, p = 0.7, list = FALSE)
+sml_train = training_lesscols[inTrain,]
+sml_valid = training_lesscols[-inTrain,]
+```
+
+
+Now we plot the training data correlation to see how the data maps itself using the function corrplot. 
+The 'color' method represents data very well through the triangle.
+```{r}
+
+corMat <- cor(sml_train[,-54])
+corrplot( corMat, order = "FPC", method = "color", type = "lower", tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+
+
+The plot grid shows the pair based correlation along the axis. The blue side from the  mid point 0 indicates High positive correlation. The red side towards the left indicated High negative correlation moves to the left of the mid point 0. The Principal Component Analysis is applies to the set of linear uncorrelated variables for the predictors in use.
+
+###Principal Component Analysis and Machine Learning
+
+We need to preprocess the data using the PCA - Principal Component Analysis. We will then predict to apply the preprocessing on both the training as well as the validation data.
+
+```{r}
+preProc <- preProcess(sml_train[,-54], method = "pca", thresh = 0.99)
+trainProc <- predict(preProc, sml_train[,-54])
+valid_testPRC <- predict(preProc, sml_valid[,-54])
+```
+
+We use the random forest approach on the trimmed training data set to train a model. A resampling method of 'cv' is used for a split data set for the trainControl().
+```{r echo=FALSE, message=FALSE, warnings=FALSE }
+suppressWarnings(suppressMessages(library(randomForest)))
+model_Fit <- train(sml_train$classe ~ ., method = "rf", data = trainProc, trControl = trainControl(method = "cv", number = 4), importance = TRUE)
+```
+
+Now we look into the DotChart of variable importance as measured using Random Forest. We choose the type "1=mean decrease in accuracy", which is applied on the trained model data from above which is the Model_Fit.
+```{r}
+varImpPlot(model_Fit$finalModel, sort = TRUE, type = 1, pch = 19, col = 1, cex = 1, 
+           main = "Individual Principal Components Significance or Importance")
+```
+
+### Cross validation Testing and the Out-of-sample Error Estimate
+
+Using the Predict function applied on the already trained model, we validate the trained and the cross validation datasets. We also examine the cross tabulated confusion matrix output. The output shows their reference values.
+
+```{r}
+pred_valid_ref <- predict(model_Fit, valid_testPRC)
+confus_mtrx <- confusionMatrix(sml_valid$classe, pred_valid_ref)
+confus_mtrx$table
+```
+
+
+with the postResample function we see how the resampled data performs. 
+```{r}
+Samplaccur <- postResample(sml_valid$classe, pred_valid_ref)
+model_accuracy <- Samplaccur[[1]]
+model_accuracy
+
+out_of_sample_err <- 1 - model_accuracy
+out_of_sample_err
+```
+
+The estimated model accuracy was at 98.23% and the estimated out-of-sample error rate based on the fitted model and cross validated dataset at 1 to 2%.
+
+### Predicted Results / Output:
+
+As we perform the final step, the key pre-processing happens on the clean final testing dataset. Some of the unwanted columns have been removed and we only have 54 variables left. We then run the fitted model and the test data through the predict function for the results.
+
+```{r}
+test_pred <- predict(preProc, har_testdata_final[,-54])
+predict_final <- predict(model_Fit, test_pred)
+predict_final
+```
